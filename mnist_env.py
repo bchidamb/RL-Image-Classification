@@ -5,6 +5,9 @@ import numpy as np
 from keras.datasets import mnist
 import matplotlib.pyplot as plt
 
+MAX_STEPS = 20
+WINDOW_SIZE = 7
+
 '''
 Notes:
     Agent navigation for image classification. We propose
@@ -19,12 +22,8 @@ Notes:
     image. The state received at each time step is the full image
     with unobserved parts masked out.
 
-    -- for now, agent outputs just the class prediction (0-9) and a prediction bit
-    -- agent's guess only counts if bit is set to 1
-    -- incorrect guess is penalized with reward -1
+    -- for now, agent outputs direction of movement and class prediction (0-9)
     -- correct guess ends game
-    
-    -- also, 20 step maximum seems harsh, may want to increase
 '''
 
 class MNISTEnv(gym.Env):
@@ -47,21 +46,24 @@ class MNISTEnv(gym.Env):
             self.Y = y_test
             self.n = len(y_test)
             
-        self.h, self.w = self.X[0].shape
+        h, w = self.X[0].shape
+        self.h = h // WINDOW_SIZE
+        self.w = w // WINDOW_SIZE
         
-        # action is a 3-tuple in {0, 1, 2, 3} x {0, 1} x {0, ..., 9}
+        self.mask = np.zeros((h, w))
+        
+        # action is a 2-tuple in {0, 1, 2, 3} x {0, ..., 9}
         # see 'step' for interpretation
-        self.action_space = spaces.MultiDiscrete([4, 2, 10])
-        self.observation_space = spaces.Box(0, 255, [self.h, self.w])
+        self.action_space = spaces.MultiDiscrete([4, 10])
+        self.observation_space = spaces.Box(0, 255, [h, w])
         
     def step(self, action):
     
         # action consists of
         #   1. direction in {N, S, E, W}
-        #   2. whether to make prediction (0/1)
         #   2. predicted class (0-9)
         assert(self.action_space.contains(action))
-        dir, pred_bit, Y_pred = action
+        dir, Y_pred = action
         
         self.steps += 1
         
@@ -74,18 +76,17 @@ class MNISTEnv(gym.Env):
         
         # make move and reveal square
         self.pos = np.clip(self.pos + move_map[dir], 0, [self.h-1, self.w-1])
-        self.mask[tuple(self.pos)] = 1
-        
-        # game ends if prediction is correct or max steps is reached
-        done = pred_bit * (Y_pred == self.Y[self.i]) or self.steps >= 20
-        
-        # -0.1 penalty for each additional timestep
-        # -1.0 penalty for incorrect guess
-        reward = -0.1 - pred_bit * (Y_pred != self.Y[self.i])
+        self._reveal()
         
         # state (observation) consists of masked image (h x w)
-        obs = self.X[self.i] * self.mask
-        assert self.observation_space.contains(obs)
+        obs = self._get_obs()
+        
+        # -0.1 penalty for each additional timestep
+        # +1.0 for correct guess
+        reward = -0.1 + int(Y_pred == self.Y[self.i])
+        
+        # game ends if prediction is correct or max steps is reached
+        done = Y_pred == self.Y[self.i] or self.steps >= MAX_STEPS
         
         # info is empty (for now)
         info = {}
@@ -96,15 +97,30 @@ class MNISTEnv(gym.Env):
         # resets the environment and returns initial observation
         # zero the mask, move to random location, and choose new image
         
-        self.pos = np.array([np.random.randint(self.h), 
-                             np.random.randint(self.w)])
-        self.mask = np.zeros((self.h, self.w))
-        self.mask[tuple(self.pos)] = 1
+        # HACK: for now, we initialize at image center
+        
+        # self.pos = np.array([np.random.randint(self.h), 
+        #                      np.random.randint(self.w)])
+        self.pos = np.array([int(self.h / 2), int(self.w / 2)])
+        self.mask[:, :] = 0
+        self._reveal()
         self.i = np.random.randint(self.n)
         self.steps = 0
         
-        obs = self.X[self.i] * self.mask
+        return self._get_obs()
+        
+    def _get_obs(self):
+        obs = self.X[self.i] * self.mask / 255
+        assert self.observation_space.contains(obs)
         return obs
+        
+    def _reveal(self):
+        # reveal the window at self.pos
+        h, w = self.pos
+        h_low, h_high = h * WINDOW_SIZE, (h + 1) * WINDOW_SIZE
+        w_low, w_high = w * WINDOW_SIZE, (w + 1) * WINDOW_SIZE
+        
+        self.mask[h_low:h_high, w_low:w_high] = 1
         
     def render(self, mode='human', close=False):
         # display mask, full image, and masked image
