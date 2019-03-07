@@ -2,8 +2,32 @@ from mnist_env import MNISTEnv
 from actor_critic_agent import MNISTNet, ActorCriticNNAgent
 import numpy as np
 import time
+import argparse
+import sys
+
+def main():
+    ''' Argument parsing.'''
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--batch_size', type=int)
+    parser.add_argument('--iters', type=int)
+    parser.add_argument('--verbose', action='store_true')
+    args = parser.parse_args(sys.argv[1:]);
+
+    print("Training...")
+    trained_agent = train(args.iters, args.batch_size, verbose=args.verbose)
+    test_agent = trained_agent.copy()
+    
+    print("Testing...")
+    test(test_agent)
+    
+    print("Evaluating...")
+    for _ in range(5):
+        eval(test_agent)
 
 def train(iterations, episodes, verbose=False):
+    ''' Method to train a model, currently fixed on
+    using ActorCritic; will change when updated to use
+    modular DeepRL env'''
     
     def obs_to_input(obs):
         # reshape to (1, 28, 28)
@@ -27,7 +51,6 @@ def train(iterations, episodes, verbose=False):
         
             if verbose and iter % 10 == 0 and ep == 0:
                 display = True
-                
             else:
                 display = False
             
@@ -106,14 +129,4 @@ def test(agent, n_test=1000):
     
     
 if __name__ == '__main__':
-    
-    print("Training...")
-    trained_agent = train(200, 100, verbose=False)
-    test_agent = trained_agent.copy()
-    
-    print("Testing...")
-    test(test_agent)
-    
-    print("Evaluating...")
-    for _ in range(5):
-        eval(test_agent)
+    main()
