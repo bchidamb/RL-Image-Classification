@@ -11,9 +11,10 @@ done = False
 while not done:
 
     env.render()
-    dir, Y_pred = env.action_space.sample()
+    action = env.action_space.sample()
+    dir, Y_pred = action % 4, action // 4
     print("Agent moved %s" % (['North', 'South', 'East', 'West'][dir]))
     print("Agent guessed %d" % Y_pred)
     
-    _, reward, done, _ = env.step(np.array([dir, Y_pred]))
+    _, reward, done, _ = env.step(action)
     print("Received reward %.1f on step %d" % (reward, env.steps))

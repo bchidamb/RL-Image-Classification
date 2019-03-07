@@ -15,12 +15,11 @@ class MNISTNet(nn.Module):
     A CNN with ReLU activations and a three-headed output, two for the 
     actor and one for the critic
     
-    y1 - movement direction distribution
-    y2 - class probabilities
-    y3 - critic's estimate of value
+    y1 - action distribution
+    y2 - critic's estimate of value
     
     Input shape:    (batch_size, D_in)
-    Output shape:   (batch_size, 4), (batch_size, 10), (batch_size, 1)
+    Output shape:   (batch_size, 40), (batch_size, 1)
     '''
     
     def __init__(self):
@@ -36,7 +35,7 @@ class MNISTNet(nn.Module):
         self.out_dir = nn.Linear(50, 4)
         self.out_digit = nn.Linear(50, 10)
         self.out_critic = nn.Linear(50, 1)
-        
+    
     def forward(self, x):
     
         x = self.conv1(x)
@@ -50,15 +49,19 @@ class MNISTNet(nn.Module):
         x = x.view(-1, 10 * 7 * 7)
         x = self.lin1(x)
         
-        y1 = self.out_dir(x)
-        y1 = F.softmax(y1, dim=-1)
+        pi1 = self.out_digit(x)
+        pi1 = F.softmax(pi1, dim=-1)
         
-        y2 = self.out_digit(x)
-        y2 = F.softmax(y2, dim=-1)
+        pi2 = self.out_dir(x)
+        pi2 = F.softmax(pi2, dim=-1)
         
-        y3 = self.out_critic(x)
+        # https://discuss.pytorch.org/t/batch-outer-product/4025
+        y1 = torch.bmm(pi1.unsqueeze(2), pi2.unsqueeze(1))
+        y1 = y1.view(-1, 40)
         
-        return y1, y2, y3
+        y2 = self.out_critic(x)
+        
+        return y1, y2
 
 def torch_to_numpy(tensor):
     return tensor.data.numpy()
@@ -104,27 +107,29 @@ class ActorCriticNNAgent:
         
         # if trainable is changed to false, the model won't be updated
         self.trainable = True
-        
+    
     def act(self, o, env=None, display=False):
         
         # feed observation as input to net to get distribution as output
         x = self.obs_to_input(o)
         x = numpy_to_torch([x])
-        y1, y2, y3 = self.model(x)
+        y1, y2 = self.model(x)
         
-        pi1 = torch_to_numpy(y1).flatten()
-        pi2 = torch_to_numpy(y2).flatten()
-        v   = torch_to_numpy(y3).squeeze()
+        pi = torch_to_numpy(y1).flatten()
+        v  = torch_to_numpy(y2).squeeze()
         
         # sample action from distribution
-        direction = np.random.choice(np.arange(4), p=pi1)
-        digit     = np.random.choice(np.arange(10), p=pi2)
-        a = (direction, digit)
+        a = np.random.choice(np.arange(40), p=pi)
         
-        if display: print("")
-        if display: print("Sampled action:", a)
-        if display: print("Value estimate:", v) 
-        if display: print("Distributions:", pi1, pi2, sep='\n')
+        if display:
+            direction, digit = a % 4, a // 4
+            pi1 = pi.reshape((10, 4)).sum(axis=0)
+            pi2 = pi.reshape((10, 4)).sum(axis=1)
+            
+            print("")
+            print("Sampled action:", (direction, digit))
+            print("Value estimate:", v) 
+            print("Distributions:", pi1, pi2, sep='\n')
         
         # update current episode in replay with observation and chosen action
         if self.trainable:
@@ -132,17 +137,17 @@ class ActorCriticNNAgent:
             self.replay[-1]['actions'].append(a)
         
         return np.array(a)
-        
+    
     def new_episode(self):
         # start a new episode in replay
         self.replay.append({'observations': [], 'actions': [], 'rewards': []})
-        
+    
     def store_reward(self, r):
         # insert 0s for actions that received no reward; end with reward r
         episode = self.replay[-1]
         T_no_reward = len(episode['actions']) - len(episode['rewards']) - 1
         episode['rewards'] += [0.0] * T_no_reward + [r]
-        
+    
     def _calculate_discounted_rewards(self):
         # calculate and store discounted rewards per episode
         
@@ -156,7 +161,7 @@ class ActorCriticNNAgent:
                 R_disc.insert(0, R_sum)
                 
             episode['rewards_disc'] = R_disc
-        
+    
     def update(self):
         
         assert(self.trainable)
@@ -175,13 +180,12 @@ class ActorCriticNNAgent:
             
             # forward pass, Y1 is pi(a | s), Y2 is V(s)
             X = numpy_to_torch([self.obs_to_input(o) for o in O])
-            Y1, Y2, Y3 = self.model(X)
-            pi1, pi2 = Y1, Y2
-            Vs_curr = Y3.view(-1)
+            Y1, Y2 = self.model(X)
+            pi = Y1
+            Vs_curr = Y2.view(-1)
             
             # log probabilities of selected actions
-            log_prob = torch.log(pi1[np.arange(T), [tup[0] for tup in A]]) \
-                     + torch.log(pi2[np.arange(T), [tup[1] for tup in A]])
+            log_prob = torch.log(pi[np.arange(T), A])
             
             # advantage of selected actions over expected reward given state
             Vs_next = torch.cat((Vs_curr[1:], torch.tensor([0.])))
@@ -204,7 +208,7 @@ class ActorCriticNNAgent:
         
         # reset the replay history
         self.replay = []
-
+    
     def copy(self):
         
         # create a copy of this agent with frozen weights

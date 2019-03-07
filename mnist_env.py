@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 
 MAX_STEPS = 20
 WINDOW_SIZE = 7
+RANDOM_LOC = False
 
 '''
 Notes:
@@ -52,18 +53,18 @@ class MNISTEnv(gym.Env):
         
         self.mask = np.zeros((h, w))
         
-        # action is a 2-tuple in {0, 1, 2, 3} x {0, ..., 9}
+        # action is an integer in {0, ..., 39}
         # see 'step' for interpretation
-        self.action_space = spaces.MultiDiscrete([4, 10])
+        self.action_space = spaces.Discrete(40)
         self.observation_space = spaces.Box(0, 255, [h, w])
         
     def step(self, action):
     
-        # action consists of
-        #   1. direction in {N, S, E, W}
-        #   2. predicted class (0-9)
+        # action a consists of
+        #   1. direction in {N, S, E, W}, determined by = a (mod 4)
+        #   2. predicted class (0-9), determined by floor(a / 4)
         assert(self.action_space.contains(action))
-        dir, Y_pred = action
+        dir, Y_pred = action % 4, action // 4
         
         self.steps += 1
         
@@ -97,11 +98,13 @@ class MNISTEnv(gym.Env):
         # resets the environment and returns initial observation
         # zero the mask, move to random location, and choose new image
         
-        # HACK: for now, we initialize at image center
-        
-        # self.pos = np.array([np.random.randint(self.h), 
-        #                      np.random.randint(self.w)])
-        self.pos = np.array([int(self.h / 2), int(self.w / 2)])
+        # initialize at random location or image center
+        if RANDOM_LOC:
+            self.pos = np.array([np.random.randint(self.h), 
+                                 np.random.randint(self.w)])
+        else:
+            self.pos = np.array([int(self.h / 2), int(self.w / 2)])
+            
         self.mask[:, :] = 0
         self._reveal()
         self.i = np.random.randint(self.n)

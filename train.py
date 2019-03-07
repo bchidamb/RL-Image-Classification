@@ -124,9 +124,10 @@ def test(agent, n_test=1000):
             total_reward += reward
         
         rewards.append(total_reward)
-        
+    
     print("Mean total reward / episode: %.3f" % np.mean(rewards))
     
     
 if __name__ == '__main__':
+
     main()
